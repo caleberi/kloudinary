@@ -1,0 +1,25 @@
+<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" SOAP-ENV:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/" xmlns:xsd="http://www.w3.org/1999/XMLSchema/" xmlns:xsi="http://www.w3.org/1999/XMLSchema/instance/">
+    <SOAP-ENV:Header>
+        <t:Transaction xmlns:t="xxs">
+            <tc>
+                <pid>FLX DMServer TC1 (8800/3070) STG 0a19</pid>
+                <tid>0B32248B-1688F5D0</tid>
+                <dt>2018-10-16T07:06:38</dt>
+            </tc>
+        </t:Transaction>
+    </SOAP-ENV:Header>
+    <SOAP-ENV:Body>
+        <ns1:XXTransactionResponse xmlns:ns1="xxs">
+            <RSP>
+                <OrderViewRS Version="17.2" TransactionIdentifier="idm220128704">
+                    <Response>
+                        whatwever
+                    </Response>
+                    <Errors>
+                        <Error ShortText="120000002" Code="325">Content for element '{http://www.iata.org/IATA/EDIST/2017.2}Order' is incomplete according to the DTD/Schema.Expecting: {http://www.iata.org/IATA/EDIST/2017.2}OriginalOrder, {http://www.iata.org/IATA/EDIST/2017.2}TotalOrderPrice, {http://www.ia....</Error>
+                    </Errors>
+                </OrderViewRS>
+            </RSP>
+        </ns1:XXTransactionResponse>
+    </SOAP-ENV:Body>
+</SOAP-ENV:Envelope>
