@@ -9,9 +9,9 @@ on:
   pull_request:
     branches: [ "main" ]
 env:
-  clientSecret: ""
-  clientKey: ""
-  clientName: ""
+  clientSecret: "$clientSecret"
+  clientKey: "$clientKey"
+  clientName: "$clientName"
   
 jobs:
 
