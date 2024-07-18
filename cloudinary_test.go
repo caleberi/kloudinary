@@ -89,9 +89,7 @@ func TestAssetUploadManager_UploadMultipleFiles(t *testing.T) {
 	dir, err := os.Getwd()
 	assert.NoError(t, err)
 
-	filesToUpload := []interface{}{
-		path.Clean(path.Join(dir, "./upload/test3.jpeg")),
-	}
+	var filesToUpload []interface{}
 
 	for i := 0; i < 3; i++ {
 		filesToUpload = append(
