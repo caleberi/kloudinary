@@ -1,5 +1,5 @@
 ![badge](https://github.com/caleberi/kloudinary/actions/workflows/go.yml/badge.svg)
-# Kloudinary: A Golang Cloudinary Wrapper
+# Kloudinary
 
 Kloudinary is a Golang wrapper around the official Cloudinary SDK. It streamlines some redundant parts of using the official SDK and can get you up and running within minutes of installation.
 
