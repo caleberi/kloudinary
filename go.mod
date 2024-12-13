@@ -12,7 +12,7 @@ require (
 
 require (
 	github.com/creasty/defaults v1.5.1 // indirect
-	github.com/google/uuid v1.2.0 // indirect
+	github.com/google/uuid v1.2.0
 	github.com/gorilla/schema v1.2.0 // indirect
 	github.com/h2non/filetype v1.1.3
 	github.com/stretchr/testify v1.9.0
