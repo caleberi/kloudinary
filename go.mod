@@ -1,4 +1,4 @@
-module github.com/caleberi/kloudinary.git
+module github.com/caleberi/kloudinary
 
 go 1.22.3
 
