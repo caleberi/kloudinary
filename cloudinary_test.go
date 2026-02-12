@@ -5,96 +5,67 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"golang.org/x/exp/rand"
-
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-var assetManager *AssetUploadManager
-
-var (
-	clientSecret = os.Getenv("clientSecret")
-	clientKey    = os.Getenv("clientKey")
-	clientName   = os.Getenv("clientName")
+const (
+	clientSecretEnv = "clientSecret"
+	clientKeyEnv    = "clientKey"
+	clientNameEnv   = "clientName"
 )
-
-func init() {
-	am, err := NewAssetUploadManager(clientName, clientKey, clientSecret)
-	if err != nil {
-		log.Fatal(err)
-	}
-	assetManager = am
-}
 
 func TestAssetUploadManager_UploadSingleFile(t *testing.T) {
-	dir, err := os.Getwd()
-	assert.NoError(t, err)
-
-	fileToUpload := path.Clean(path.Join(dir, "./upload/test0.png"))
+	assetManager := newTestAssetManager(t)
+	fileToUpload := testUploadPath(t, "test0.png")
 	ctx, cancelFunc := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancelFunc()
 
 	result, err := assetManager.UploadSingleFile(ctx, fileToUpload)
-
-	// Check for any errors
-	if err != nil {
-		t.Errorf("UploadSingleFile() error = %v", err)
-		return
-	}
+	require.NoError(t, err)
 
 	assert.NotNil(t, result)
 	r := *result
-	log.Printf("result : ( %v )", r)
 	assert.Empty(t, r.Error.Message)
 	assert.NotEmpty(t, r.PublicID)
 	assert.NotEmpty(t, r.SecureURL)
-	log.Printf("Secure-url for [%s] = %s", result.PublicID, result.SecureURL)
 }
 
 func TestAssetUploadManager_UploadSingleFile_BinaryData(t *testing.T) {
-	dir, err := os.Getwd()
-	assert.NoError(t, err)
-
-	fileToUpload := path.Clean(path.Join(dir, "./upload/test5.xml"))
+	assetManager := newTestAssetManager(t)
+	fileToUpload := testUploadPath(t, "test5.xml")
 	file, err := os.Open(fileToUpload)
 	assert.NoError(t, err)
+	defer func() {
+		_ = file.Close()
+	}()
 
 	ctx, cancelFunc := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancelFunc()
 
 	result, err := assetManager.UploadSingleFile(ctx, file)
-
-	// Check for any errors
-	if err != nil {
-		t.Errorf("UploadSingleFile() error = %v", err)
-		return
-	}
+	require.NoError(t, err)
 
 	assert.NotNil(t, result)
 	r := *result
-	log.Printf("result : ( %v )", r)
 	assert.Empty(t, r.Error.Message)
 	assert.NotEmpty(t, r.PublicID)
 	assert.NotEmpty(t, r.SecureURL)
-	log.Printf("Secure-url for [%s] = %s", result.PublicID, result.SecureURL)
 
 }
 
 func TestAssetUploadManager_UploadMultipleFiles(t *testing.T) {
-	dir, err := os.Getwd()
-	assert.NoError(t, err)
+	assetManager := newTestAssetManager(t)
+	var filesToUpload []any
 
-	var filesToUpload []interface{}
-
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		filesToUpload = append(
 			filesToUpload,
-			path.Clean(path.Join(dir, fmt.Sprintf("./upload/test%d.png", i))),
+			testUploadPath(t, fmt.Sprintf("test%d.png", i)),
 		)
 	}
 
@@ -109,16 +80,11 @@ func TestAssetUploadManager_UploadMultipleFiles(t *testing.T) {
 }
 
 func TestLargeAssetUploadManager_UploadMultipleFiles(t *testing.T) {
-	dir, err := os.Getwd()
+	assetManager := newTestAssetUploadManagerLarge(t)
+	uploadDir := testUploadDir(t)
+	filesToUpload, err := getAllFilePaths(uploadDir)
 	assert.NoError(t, err)
-
-	filesToUpload, err := getAllFilePaths(path.Join(dir, "upload"))
-	assert.NoError(t, err)
-
-	// since we don't want to use the total number go routine ratio to file
-	numberOfRoutine := int64(rand.Intn(10) + 1)
-
-	assetManager.MaxNumberOfConcurrentUploads = numberOfRoutine
+	assetManager.MaxNumberOfConcurrentUploads = 4
 
 	ctx, cancelFunc := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancelFunc()
@@ -154,6 +120,33 @@ func printTestStats(t *testing.T, results []FileUploadResult, startTime time.Tim
 	}
 	endTime := time.Since(startTime)
 	log.Printf("Average upload time = (%.2fs) totalTime = (%.2f)", (endTime.Seconds())/float64(len(filesToUpload)), endTime.Seconds())
+}
+
+func newTestAssetManager(t *testing.T) *AssetUploadManager {
+	clientSecret := os.Getenv(clientSecretEnv)
+	clientKey := os.Getenv(clientKeyEnv)
+	clientName := os.Getenv(clientNameEnv)
+	if clientSecret == "" || clientKey == "" || clientName == "" {
+		t.Skip("cloudinary credentials not set in environment")
+	}
+
+	am, err := NewAssetUploadManager(clientName, clientKey, clientSecret)
+	require.NoError(t, err)
+	return am
+}
+
+func newTestAssetUploadManagerLarge(t *testing.T) *AssetUploadManager {
+	return newTestAssetManager(t)
+}
+
+func testUploadDir(t *testing.T) string {
+	dir, err := os.Getwd()
+	require.NoError(t, err)
+	return filepath.Join(dir, "upload")
+}
+
+func testUploadPath(t *testing.T, filename string) string {
+	return filepath.Join(testUploadDir(t), filename)
 }
 
 func getAllFilePaths(dir string) ([]string, error) {
