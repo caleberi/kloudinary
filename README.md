@@ -1,7 +1,7 @@
 ![badge](https://github.com/caleberi/kloudinary/actions/workflows/go.yml/badge.svg)
 # Kloudinary
 
-Kloudinary is a Golang wrapper around the official Cloudinary SDK. It streamlines some redundant parts of using the official SDK and can get you up and running within minutes of installation.
+Kloudinary is a Go wrapper around the official Cloudinary SDK. It streamlines uploads, supports concurrent batch uploads, and provides helper methods for asset destruction and image transformations.
 
 ## Features
 
@@ -20,6 +20,7 @@ go get github.com/caleberi/kloudinary
 ```
 
 ## Usage
+
 ### Initialization
 
 First, you need to initialize the AssetUploadManager with your Cloudinary credentials:
@@ -33,9 +34,9 @@ import (
 )
 
 func main() {
-	cloudName := "your-cloud-name"
-	apiKey := "your-api-key"
-	apiSecret := "your-api-secret"
+	cloudName := os.Getenv("CLOUDINARY_CLOUD_NAME")
+	apiKey := os.Getenv("CLOUDINARY_API_KEY")
+	apiSecret := os.Getenv("CLOUDINARY_API_SECRET")
 
 	am, err := kloudinary.NewAssetUploadManager(cloudName, apiKey, apiSecret)
 	if err != nil {
@@ -48,6 +49,13 @@ func main() {
 
 ### Uploading Files
 
+Create a context with a timeout for upload calls:
+
+```go
+ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+defer cancel()
+```
+
 1. Upload a Single File
 To upload a single file, use the UploadSingleFile method:
 
@@ -57,6 +65,21 @@ if err != nil {
     log.Fatalf("Failed to upload file: %v", err)
 }
 log.Printf("Upload successful: %v", result)
+```
+
+You can also upload from an `io.Reader` (for example, a file handle or a bytes buffer):
+
+```go
+file, err := os.Open("path/to/your/file.jpg")
+if err != nil {
+	log.Fatal(err)
+}
+defer file.Close()
+
+result, err := am.UploadSingleFile(ctx, file)
+if err != nil {
+	log.Fatalf("Failed to upload file: %v", err)
+}
 ```
 
 2. Upload Multiple Files
@@ -94,13 +117,27 @@ log.Printf("Transformed image URL: %s", url)
 
 ## Configuration
 
-The AssetUploadManager can be configured with various settings:
+The `AssetUploadManager` can be configured with various settings:
 ```go
 am.FileTypeSupported = []string{"jpg", "png", "gif"}
 am.MaxAssetSize = 10 * 1024 * 1024 // 10 MB
 am.MaxUploadTimeout = 30 * time.Second
 am.MaxNumberOfConcurrentUploads = 5
 ```
+
+Notes:
+
+- `MaxAssetSize` is in bytes.
+- `MaxNumberOfConcurrentUploads` controls the number of parallel uploads used by `UploadMultipleFiles`.
+- File extension detection is case-insensitive.
+
+## Environment Variables
+
+Recommended variables for initialization:
+
+- `CLOUDINARY_CLOUD_NAME`
+- `CLOUDINARY_API_KEY`
+- `CLOUDINARY_API_SECRET`
 
 ## License
 This project is licensed under the MIT License. See the LICENSE file for details.
