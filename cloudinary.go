@@ -6,12 +6,12 @@ package kloudinary
 // base on the mimetype of the file being uploaded
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -140,7 +140,7 @@ func NewAssetUploadManager(cloudName string, apiKey string, apiSecret string) (*
 	am.FileTypeSupported = append(am.FileTypeSupported, videoExtensions...)
 	am.FileTypeSupported = append(am.FileTypeSupported, documentExtensions...)
 
-	am.MaxAssetSize = 1024 * 4 // Max size of 4 mb by default
+	am.MaxAssetSize = 4 * 1024 * 1024 // Max size of 4 MB by default
 
 	am.Metadata = Meta{}                  // metadata to store on each asset manger configuration
 	am.MaxNumberOfConcurrentUploads = 1   // default to single
@@ -179,22 +179,19 @@ func (am *AssetUploadManager) getLogicalFolderBasedOnExtension(extension string)
 // UploadSingleFile is used to upload a single file to the server
 // the file can either be a byte slice or a string
 func (am *AssetUploadManager) UploadSingleFile(ctx context.Context, file interface{}) (*uploader.UploadResult, error) {
+	if file == nil {
+		return nil, errors.New("nil file provided")
+	}
 
-	value := reflect.TypeOf(file)
-
-	switch value.Kind() {
-	case reflect.String:
-		return am.uploadBasedOnFilePath(ctx, file)
+	switch v := file.(type) {
+	case string:
+		return am.uploadBasedOnFilePath(ctx, v)
+	case []byte:
+		return am.upload(ctx, bytes.NewReader(v))
+	case io.Reader:
+		return am.upload(ctx, v)
 	default:
-		// the interface type provide can be
-		// asserted the file type from the interface
-		// since it is an io.Reader type. we can check the first 261-byte header
-		// and assert the mimetype of the file
-		file, ok := file.(io.Reader)
-		if !ok {
-			return nil, errors.New("data type not supported for interface")
-		}
-		return am.upload(ctx, file)
+		return nil, errors.New("data type not supported for interface")
 	}
 }
 
@@ -229,59 +226,74 @@ func (am *AssetUploadManager) DestroyAsset(ctx context.Context, publicId string,
 }
 
 func (am *AssetUploadManager) UploadMultipleFiles(ctx context.Context, files ...interface{}) []FileUploadResult {
-
-	var (
-		ret       = make([]FileUploadResult, 0)
-		uploads   = make(chan FileUploadResult, len(files)) //  upload retrieval channel
-		semaphore = make(chan struct{}, am.MaxNumberOfConcurrentUploads)
-		wg        = sync.WaitGroup{}
-	)
-
-	wg.Add(1)
-	go func(wg *sync.WaitGroup, ret *[]FileUploadResult, uploads chan FileUploadResult) {
-		defer wg.Done()
-		for upload := range uploads {
-			*ret = append(*ret, upload)
-		}
-	}(&wg, &ret, uploads)
-
-	for id, file := range files {
-		semaphore <- struct{}{}
-		go func(id int, file interface{}) {
-			defer func(id int, semaphore chan struct{}) {
-				<-semaphore
-				if id == len(files)-1 {
-					close(uploads)
-					close(semaphore)
-				}
-			}(id, semaphore)
-
-			start := time.Now()
-			ctx, cancel := context.WithTimeout(context.Background(), am.MaxUploadTimeout)
-			defer cancel()
-			result, err := am.UploadSingleFile(ctx, file)
-			finish := time.Since(start)
-			uploads <- FileUploadResult{file: file, err: err, result: result, latency: finish}
-
-		}(id, file)
+	if len(files) == 0 {
+		return []FileUploadResult{}
 	}
 
-	wg.Wait()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	concurrency := am.MaxNumberOfConcurrentUploads
+	if concurrency < 1 {
+		concurrency = 1
+	}
+
+	var (
+		ret     = make([]FileUploadResult, 0, len(files))
+		uploads = make(chan FileUploadResult, len(files))
+		guard   = make(chan struct{}, concurrency)
+	)
+
+	var collectWg sync.WaitGroup
+	collectWg.Add(1)
+	go func() {
+		defer collectWg.Done()
+		for upload := range uploads {
+			ret = append(ret, upload)
+		}
+	}()
+
+	var workerWg sync.WaitGroup
+	for _, file := range files {
+		guard <- struct{}{}
+		workerWg.Add(1)
+		go func(file interface{}) {
+			defer workerWg.Done()
+			defer func() { <-guard }()
+
+			start := time.Now()
+			workerCtx, cancel := context.WithTimeout(ctx, am.MaxUploadTimeout)
+			defer cancel()
+			result, err := am.UploadSingleFile(workerCtx, file)
+			finish := time.Since(start)
+			uploads <- FileUploadResult{file: file, err: err, result: result, latency: finish}
+		}(file)
+	}
+
+	go func() {
+		workerWg.Wait()
+		close(uploads)
+	}()
+
+	collectWg.Wait()
 	return ret
 }
 
 func (am *AssetUploadManager) upload(ctx context.Context, file io.Reader) (*uploader.UploadResult, error) {
 	head := make([]byte, 261)
-	_, err := file.Read(head)
-	if err != nil {
+	n, err := io.ReadFull(file, head)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
 		return nil, err
 	}
+	head = head[:n]
 
 	kind, _ := filetype.Match(head)
+	reader := io.MultiReader(bytes.NewReader(head), file)
 
 	return am.cld.Upload.Upload(
 		ctx,
-		file,
+		reader,
 		uploader.UploadParams{
 			PublicID: uuid.NewString(),
 			Folder:   am.getLogicalFolderBasedOnExtension(kind.Extension),
@@ -290,36 +302,32 @@ func (am *AssetUploadManager) upload(ctx context.Context, file io.Reader) (*uplo
 	)
 }
 
-func (am *AssetUploadManager) uploadBasedOnFilePath(ctx context.Context, file interface{}) (*uploader.UploadResult, error) {
-	f := file.(string)
+func (am *AssetUploadManager) uploadBasedOnFilePath(ctx context.Context, filePath string) (*uploader.UploadResult, error) {
+	base := filepath.Base(filePath)
 
-	base := filepath.Base(f)
-
-	extension := strings.TrimPrefix(filepath.Ext(f), ".")
+	extension := strings.TrimPrefix(filepath.Ext(filePath), ".")
+	extension = strings.ToLower(extension)
 
 	if !am.isFileSupported(extension) {
 		return nil, errors.New("invalid MIME type")
 	}
 
-	stat, err := os.Lstat(file.(string))
+	stat, err := os.Lstat(filePath)
 
 	if err != nil {
 		return nil, err
 	}
 
-	// Convert file size from bytes to megabytes
-	sizeInMB := float64(stat.Size()) / (1024 * 1024)
-
-	// Check if the file size exceeds the maximum allowed size in megabytes
-	if sizeInMB > float64(am.MaxAssetSize) {
-		if !(stat.Mode().IsDir() || stat.Mode().IsRegular()) {
-			return nil, errors.New("max asset size exceeded")
-		}
+	if !stat.Mode().IsRegular() {
+		return nil, errors.New("invalid file type")
 	}
 
-	f, _ = file.(string)
+	if stat.Size() > am.MaxAssetSize {
+		return nil, errors.New("max asset size exceeded")
+	}
+
 	return am.cld.Upload.Upload(
-		ctx, f,
+		ctx, filePath,
 		uploader.UploadParams{
 			PublicID: base,
 			Folder:   am.getLogicalFolderBasedOnExtension(extension),
